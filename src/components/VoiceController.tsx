@@ -33,6 +33,7 @@ export const VoiceController: React.FC<VoiceControllerProps> = ({ onNavigate }) 
   const [autoRestart, setAutoRestart] = useState<boolean>(true);
   const [lastDetectedText, setLastDetectedText] = useState<string>('');
   const awakeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isSpeakingRef = useRef<boolean>(false);
 
   const {
     transcript,
@@ -76,14 +77,14 @@ export const VoiceController: React.FC<VoiceControllerProps> = ({ onNavigate }) 
     }
   }, []);
 
-  // Text-to-Speech vocal feedback in Indonesian
+  // Text-to-Speech vocal feedback in Indonesian (suppressing mic while speaking to prevent loop)
   const speakVoice = useCallback((text: string) => {
     try {
       if ('speechSynthesis' in window) {
         window.speechSynthesis.resume();
         window.speechSynthesis.cancel();
+        isSpeakingRef.current = true;
 
-        // Brief timeout ensures cancel finishes before speaking
         setTimeout(() => {
           const utterance = new SpeechSynthesisUtterance(text);
           utterance.lang = 'id-ID';
@@ -91,20 +92,31 @@ export const VoiceController: React.FC<VoiceControllerProps> = ({ onNavigate }) 
           utterance.pitch = 1.15;
           utterance.volume = 1.0;
 
-          // Attempt to select an Indonesian or female voice if available
           const voices = window.speechSynthesis.getVoices();
           const idVoice = voices.find((v) => v.lang.includes('id') || v.lang.includes('ID'));
           if (idVoice) {
             utterance.voice = idVoice;
           }
 
+          utterance.onend = () => {
+            // Buffer delay after speech finishes to prevent any microphone echo
+            setTimeout(() => {
+              isSpeakingRef.current = false;
+              resetTranscript();
+            }, 450);
+          };
+
+          utterance.onerror = () => {
+            isSpeakingRef.current = false;
+          };
+
           window.speechSynthesis.speak(utterance);
         }, 60);
       }
     } catch {
-      // ignore
+      isSpeakingRef.current = false;
     }
-  }, []);
+  }, [resetTranscript]);
 
   // Execute navigation with voice feedback
   const executeNavigation = useCallback((page: PageId, label: string) => {
@@ -124,14 +136,11 @@ export const VoiceController: React.FC<VoiceControllerProps> = ({ onNavigate }) 
     }, 4000);
   }, [onNavigate, resetTranscript, speakVoice]);
 
-  // Activate Jova with sound chime and voice feedback
+  // Activate Jova with sound chime ONLY (no spoken "Jova" to prevent acoustic echo loop)
   const wakeUpJova = useCallback(() => {
     setIsAwake(true);
-    playWakeChime();
+    playWakeChime(); // Crisp pleasant chime sound only, preventing acoustic echo loop!
     setFeedback('⚡ Jova Aktif! Katakan: Beranda, Dashboard, Inovasi, atau Profil');
-
-    // Vocal response so user clearly hears Jova is listening
-    speakVoice('Halo, saya Jova! Silakan sebutkan halaman tujuan.');
     resetTranscript();
 
     if (awakeTimeoutRef.current) {
@@ -143,7 +152,7 @@ export const VoiceController: React.FC<VoiceControllerProps> = ({ onNavigate }) 
       setFeedback('Jova kembali ke mode siaga.');
       setTimeout(() => setFeedback(null), 2500);
     }, 10000);
-  }, [playWakeChime, resetTranscript, speakVoice]);
+  }, [playWakeChime, resetTranscript]);
 
   // Comprehensive wake word detector handling Google Speech API Indonesian variations
   const matchesWakeWord = (text: string): boolean => {
@@ -171,9 +180,9 @@ export const VoiceController: React.FC<VoiceControllerProps> = ({ onNavigate }) 
     return wakePatterns.some((pattern) => lower.includes(pattern));
   };
 
-  // Continuous speech parser
+  // Continuous speech parser (ignoring input while speaking to prevent echo loop)
   useEffect(() => {
-    if (!transcript) return;
+    if (!transcript || isSpeakingRef.current) return;
     const text = transcript.toLowerCase().trim();
     setLastDetectedText(transcript);
 
@@ -444,7 +453,7 @@ export const VoiceController: React.FC<VoiceControllerProps> = ({ onNavigate }) 
               <span>Panggil <code>"Jova"</code> (atau <em>"Halo Jova"</em>, <em>"Hai Jova"</em>).</span>
             </div>
             <div className="flow-substep">
-              🔊 <strong>Respon Suara:</strong> Jova akan berbunyi *chime* & berbicara: <em>"Halo, saya Jova! Silakan sebutkan halaman tujuan."</em>
+              🔔 <strong>Respon Suara:</strong> Jova berbunyi nada lonceng <em>chime</em> cerah (siap menerima perintah).
             </div>
             <div className="flow-step">
               <span className="step-num">2</span>
